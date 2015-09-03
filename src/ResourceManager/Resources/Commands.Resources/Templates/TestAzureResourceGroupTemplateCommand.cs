@@ -15,6 +15,7 @@
 using System.Collections.Generic;
 using System.Management.Automation;
 using Microsoft.Azure.Commands.Resources.Models;
+using Microsoft.Azure.Management.Resources.Models;
 using Microsoft.WindowsAzure.Commands.Utilities.Common;
 
 namespace Microsoft.Azure.Commands.Resources.ResourceGroupDeployments
@@ -29,19 +30,29 @@ namespace Microsoft.Azure.Commands.Resources.ResourceGroupDeployments
         [ValidateNotNullOrEmpty]
         public string ResourceGroupName { get; set; }
 
+        [Parameter(Mandatory = false, ValueFromPipelineByPropertyName = true, HelpMessage = "The deployment mode.")]
+        public DeploymentMode Mode { get; set; }
+
+        public TestAzureResourceGroupTemplateCommand()
+        {
+            this.Mode = DeploymentMode.Incremental;
+        }
+
         public override void ExecuteCmdlet()
         {
+            this.WriteWarning("The Test-AzureResourceGroupTemplate cmdlet is being renamed to Test-AzureResourceGroupDeployment in a future release.");
             ValidatePSResourceGroupDeploymentParameters parameters = new ValidatePSResourceGroupDeploymentParameters()
             {
                 ResourceGroupName = ResourceGroupName,
                 GalleryTemplateIdentity = GalleryTemplateIdentity,
                 TemplateFile = TemplateUri ?? this.TryResolvePath(TemplateFile),
                 TemplateParameterObject = GetTemplateParameterObject(TemplateParameterObject),
+                ParameterUri = TemplateParameterUri,
                 TemplateVersion = TemplateVersion,
                 StorageAccountName = StorageAccountName
             };
 
-            WriteObject(ResourcesClient.ValidatePSResourceGroupDeployment(parameters));
+            WriteObject(ResourcesClient.ValidatePSResourceGroupDeployment(parameters, Mode));
         }
     }
 }

@@ -24,7 +24,7 @@ function Test-VirtualMachine
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
         
         # VM Profile & Hardware
@@ -116,7 +116,7 @@ function Test-VirtualMachine
 
         # Virtual Machine
         # TODO: Still need to do retry for New-AzureVM for SA, even it's returned in Get-.
-        New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p;
+        New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p;
 
         # Get VM
         $vm1 = Get-AzureVM -Name $vmname -ResourceGroupName $rgname;
@@ -139,7 +139,7 @@ function Test-VirtualMachine
 
         # Update
         $p.Location = $vm1.Location;
-        Update-AzureVM -ResourceGroupName $rgname -Name $vmname -VM $p;
+        Update-AzureVM -ResourceGroupName $rgname -VM $p;
 
         $vm2 = Get-AzureVM -Name $vmname -ResourceGroupName $rgname;
         Assert-AreEqual $vm2.NetworkProfile.NetworkInterfaces.Count 1;
@@ -243,7 +243,7 @@ function Test-VirtualMachineImageList
 
     try
     {
-        $locStr = 'westus';
+        $locStr = Get-ComputeVMLocation;
 
         # List Tests
         $foundAnyImage = $false;
@@ -397,7 +397,7 @@ function Test-VirtualMachineSizeAndUsage
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
 
         # Availability Set
@@ -487,7 +487,7 @@ function Test-VirtualMachineSizeAndUsage
 
         # Virtual Machine
         # TODO: Still need to do retry for New-AzureVM for SA, even it's returned in Get-.
-        New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p;
+        New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p;
 
         # Test Sizes
         $s1 = Get-AzureVMSize -Location ($loc -replace ' ');
@@ -571,7 +571,7 @@ function Test-VirtualMachinePIRv2
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
         
         # VM Profile & Hardware
@@ -656,7 +656,7 @@ function Test-VirtualMachinePIRv2
 
         # Virtual Machine
         # TODO: Still need to do retry for New-AzureVM for SA, even it's returned in Get-.
-        New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p;
+        New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p;
 
         # Remove
         # Remove-AzureVM -ResourceGroupName $rgname -Name $vmname -Force;
@@ -680,7 +680,7 @@ function Test-VirtualMachineCapture
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
         
         # VM Profile & Hardware
@@ -763,7 +763,7 @@ function Test-VirtualMachineCapture
 
         # Virtual Machine
         # TODO: Still need to do retry for New-AzureVM for SA, even it's returned in Get-.
-        New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p;
+        New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p;
 
         # Stop the VM before Capture
         Stop-AzureVM -ResourceGroupName $rgname -Name $vmname -Force;
@@ -786,10 +786,6 @@ function Test-VirtualMachineCapture
     }
 }
 
-<#
-.SYNOPSIS
-Test Virtual Machines Data Disks
-#>
 function Test-VirtualMachineDataDisk
 {
     # Setup
@@ -798,7 +794,210 @@ function Test-VirtualMachineDataDisk
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
+        New-AzureResourceGroup -Name $rgname -Location $loc -Force;
+
+        # VM Profile & Hardware
+        $vmsize = 'Standard_A4';
+        $vmname = 'vm' + $rgname;
+        $p = New-AzureVMConfig -VMName $vmname -VMSize $vmsize;
+        Assert-AreEqual $p.HardwareProfile.VirtualMachineSize $vmsize;
+
+        # NRP
+        $subnet = New-AzureVirtualNetworkSubnetConfig -Name ('subnet' + $rgname) -AddressPrefix "10.0.0.0/24";
+        $vnet = New-AzureVirtualNetwork -Force -Name ('vnet' + $rgname) -ResourceGroupName $rgname -Location $loc -AddressPrefix "10.0.0.0/16" -DnsServer "10.1.1.1" -Subnet $subnet;
+        $vnet = Get-AzureVirtualNetwork -Name ('vnet' + $rgname) -ResourceGroupName $rgname;
+        $subnetId = $vnet.Subnets[0].Id;
+        $pubip = New-AzurePublicIpAddress -Force -Name ('pubip' + $rgname) -ResourceGroupName $rgname -Location $loc -AllocationMethod Dynamic -DomainNameLabel ('pubip' + $rgname);
+        $pubip = Get-AzurePublicIpAddress -Name ('pubip' + $rgname) -ResourceGroupName $rgname;
+        $pubipId = $pubip.Id;
+        $nic = New-AzureNetworkInterface -Force -Name ('nic' + $rgname) -ResourceGroupName $rgname -Location $loc -SubnetId $subnetId -PublicIpAddressId $pubip.Id;
+        $nic = Get-AzureNetworkInterface -Name ('nic' + $rgname) -ResourceGroupName $rgname;
+        $nicId = $nic.Id;
+
+        $p = Add-AzureVMNetworkInterface -VM $p -Id $nicId;
+        Assert-AreEqual $p.NetworkProfile.NetworkInterfaces.Count 1;
+        Assert-AreEqual $p.NetworkProfile.NetworkInterfaces[0].ReferenceUri $nicId;
+
+        # Adding the same Nic but not set it Primary
+        $p = Add-AzureVMNetworkInterface -VM $p -Id $nicId -Primary;
+        Assert-AreEqual $p.NetworkProfile.NetworkInterfaces.Count 1;
+        Assert-AreEqual $p.NetworkProfile.NetworkInterfaces[0].ReferenceUri $nicId;
+        Assert-AreEqual $p.NetworkProfile.NetworkInterfaces[0].Primary $true;
+
+        # Storage Account (SA)
+        $stoname = 'sto' + $rgname;
+        $stotype = 'Standard_GRS';
+        New-AzureStorageAccount -ResourceGroupName $rgname -Name $stoname -Location $loc -Type $stotype;
+        $stoaccount = Get-AzureStorageAccount -ResourceGroupName $rgname -Name $stoname;
+
+        $osDiskName = 'osDisk';
+        $osDiskCaching = 'ReadWrite';
+        $osDiskVhdUri = "https://$stoname.blob.core.windows.net/test/os.vhd";
+        $dataDiskVhdUri1 = "https://$stoname.blob.core.windows.net/test/data1.vhd";
+        $dataDiskVhdUri2 = "https://$stoname.blob.core.windows.net/test/data2.vhd";
+        $dataDiskVhdUri3 = "https://$stoname.blob.core.windows.net/test/data3.vhd";
+        $dataDiskName1 = 'testDataDisk1';
+        $dataDiskName2 = 'testDataDisk2';
+        $dataDiskName3 = 'testDataDisk3';
+
+        $p = Set-AzureVMOSDisk -VM $p -Name $osDiskName -VhdUri $osDiskVhdUri -Caching $osDiskCaching -CreateOption FromImage;
+
+        $p = Add-AzureVMDataDisk -VM $p -Name $dataDiskName1 -Caching 'ReadOnly' -DiskSizeInGB 5 -Lun 1 -VhdUri $dataDiskVhdUri1 -CreateOption Empty;
+        $p = Add-AzureVMDataDisk -VM $p -Name $dataDiskName2 -Caching 'ReadOnly' -DiskSizeInGB 11 -Lun 2 -VhdUri $dataDiskVhdUri2 -CreateOption Empty;
+        $p = Add-AzureVMDataDisk -VM $p -Name $dataDiskName3 -Caching 'ReadOnly' -DiskSizeInGB 12 -Lun 3 -VhdUri $dataDiskVhdUri3 -CreateOption Empty;
+        $p = Remove-AzureVMDataDisk -VM $p -Name $dataDiskName3;
+
+        $p = Set-AzureVMDataDisk -VM $p -Name $dataDiskName1 -DiskSizeInGB 10;
+        Assert-ThrowsContains { Set-AzureVMDataDisk -VM $p -Name $dataDiskName3 -Caching 'ReadWrite'; } "not currently assigned for this VM";
+
+        Assert-AreEqual $p.StorageProfile.OSDisk.Caching $osDiskCaching;
+        Assert-AreEqual $p.StorageProfile.OSDisk.Name $osDiskName;
+        Assert-AreEqual $p.StorageProfile.OSDisk.VirtualHardDisk.Uri $osDiskVhdUri;
+
+        Assert-AreEqual $p.StorageProfile.DataDisks.Count 2;
+        Assert-AreEqual $p.StorageProfile.DataDisks[0].Name $dataDiskName1;
+        Assert-AreEqual $p.StorageProfile.DataDisks[0].Caching 'ReadOnly';
+        Assert-AreEqual $p.StorageProfile.DataDisks[0].DiskSizeGB 10;
+        Assert-AreEqual $p.StorageProfile.DataDisks[0].Lun 1;
+        Assert-AreEqual $p.StorageProfile.DataDisks[0].VirtualHardDisk.Uri $dataDiskVhdUri1;
+        Assert-AreEqual $p.StorageProfile.DataDisks[0].CreateOption 'Empty';
+
+        Assert-AreEqual $p.StorageProfile.DataDisks[1].Name $dataDiskName2;
+        Assert-AreEqual $p.StorageProfile.DataDisks[1].Caching 'ReadOnly';
+        Assert-AreEqual $p.StorageProfile.DataDisks[1].DiskSizeGB 11;
+        Assert-AreEqual $p.StorageProfile.DataDisks[1].Lun 2;
+        Assert-AreEqual $p.StorageProfile.DataDisks[1].VirtualHardDisk.Uri $dataDiskVhdUri2;
+        Assert-AreEqual $p.StorageProfile.DataDisks[1].CreateOption 'Empty';
+
+        # OS & Image
+        $user = "Foo12";
+        $password = 'BaR@123' + $rgname;
+        $securePassword = ConvertTo-SecureString $password -AsPlainText -Force;
+        $cred = New-Object System.Management.Automation.PSCredential ($user, $securePassword);
+        $computerName = 'test';
+        $vhdContainer = "https://$stoname.blob.core.windows.net/test";
+
+        $p = Set-AzureVMOperatingSystem -VM $p -Windows -ComputerName $computerName -Credential $cred;
+
+        $imgRef = Get-DefaultCRPImage -loc $loc;
+        $p = ($imgRef | Set-AzureVMSourceImage -VM $p);
+
+        Assert-AreEqual $p.OSProfile.AdminUsername $user;
+        Assert-AreEqual $p.OSProfile.ComputerName $computerName;
+        Assert-AreEqual $p.OSProfile.AdminPassword $password;
+
+        Assert-AreEqual $p.StorageProfile.ImageReference.Offer $imgRef.Offer;
+        Assert-AreEqual $p.StorageProfile.ImageReference.Publisher $imgRef.PublisherName;
+        Assert-AreEqual $p.StorageProfile.ImageReference.Sku $imgRef.Skus;
+        Assert-AreEqual $p.StorageProfile.ImageReference.Version $imgRef.Version;
+
+        # Virtual Machine
+        # TODO: Still need to do retry for New-AzureVM for SA, even it's returned in Get-.
+        New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p;
+
+        # Get VM
+        $vm1 = Get-AzureVM -Name $vmname -ResourceGroupName $rgname;
+
+        Assert-AreEqual $vm1.Name $vmname;
+        Assert-AreEqual $vm1.NetworkProfile.NetworkInterfaces.Count 1;
+        Assert-AreEqual $vm1.NetworkProfile.NetworkInterfaces[0].ReferenceUri $nicId;
+
+        Assert-AreEqual $vm1.StorageProfile.ImageReference.Offer $imgRef.Offer;
+        Assert-AreEqual $vm1.StorageProfile.ImageReference.Publisher $imgRef.PublisherName;
+        Assert-AreEqual $vm1.StorageProfile.ImageReference.Sku $imgRef.Skus;
+        Assert-AreEqual $vm1.StorageProfile.ImageReference.Version $imgRef.Version;
+
+        Assert-AreEqual $vm1.StorageProfile.DataDisks.Count 2;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[0].Name $dataDiskName1;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[0].Caching 'ReadOnly';
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[0].DiskSizeGB 10;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[0].Lun 1;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[0].VirtualHardDisk.Uri $dataDiskVhdUri1;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[0].CreateOption 'Empty';
+
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[1].Name $dataDiskName2;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[1].Caching 'ReadOnly';
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[1].DiskSizeGB 11;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[1].Lun 2;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[1].VirtualHardDisk.Uri $dataDiskVhdUri2;
+        Assert-AreEqual $vm1.StorageProfile.DataDisks[1].CreateOption 'Empty';
+
+        Assert-AreEqual $vm1.OSProfile.AdminUsername $user;
+        Assert-AreEqual $vm1.OSProfile.ComputerName $computerName;
+        Assert-AreEqual $vm1.HardwareProfile.VirtualMachineSize $vmsize;
+
+        $vm1 = Set-AzureVMDataDisk -VM $vm1 -Caching 'ReadWrite' -Lun 1;
+        $vm1 = Set-AzureVMDataDisk -VM $vm1 -Name $dataDiskName2 -Caching 'ReadWrite';
+        $vm1 = Add-AzureVMDataDisk -VM $vm1 -Name $dataDiskName3 -Caching 'ReadOnly' -DiskSizeInGB 12 -Lun 3 -VhdUri $dataDiskVhdUri3 -CreateOption Empty;
+
+        # Update
+        Update-AzureVM -ResourceGroupName $rgname -VM $vm1;
+
+        $vm2 = Get-AzureVM -Name $vmname -ResourceGroupName $rgname;
+        Assert-AreEqual $vm2.NetworkProfile.NetworkInterfaces.Count 1;
+        Assert-AreEqual $vm2.NetworkProfile.NetworkInterfaces[0].ReferenceUri $nicId;
+
+        Assert-AreEqual $vm2.StorageProfile.ImageReference.Offer $imgRef.Offer;
+        Assert-AreEqual $vm2.StorageProfile.ImageReference.Publisher $imgRef.PublisherName;
+        Assert-AreEqual $vm2.StorageProfile.ImageReference.Sku $imgRef.Skus;
+        Assert-AreEqual $vm2.StorageProfile.ImageReference.Version $imgRef.Version;
+
+        Assert-AreEqual $vm2.StorageProfile.DataDisks.Count 3;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[0].Name $dataDiskName1;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[0].Caching 'ReadWrite';
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[0].DiskSizeGB 10;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[0].Lun 1;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[0].VirtualHardDisk.Uri $dataDiskVhdUri1;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[0].CreateOption 'Empty';
+
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[1].Name $dataDiskName2;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[1].Caching 'ReadWrite';
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[1].DiskSizeGB 11;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[1].Lun 2;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[1].VirtualHardDisk.Uri $dataDiskVhdUri2;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[1].CreateOption 'Empty';
+
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[2].Name $dataDiskName3;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[2].Caching 'ReadOnly';
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[2].DiskSizeGB 12;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[2].Lun 3;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[2].VirtualHardDisk.Uri $dataDiskVhdUri3;
+        Assert-AreEqual $vm2.StorageProfile.DataDisks[2].CreateOption 'Empty';
+
+        Assert-AreEqual $vm2.OSProfile.AdminUsername $user;
+        Assert-AreEqual $vm2.OSProfile.ComputerName $computerName;
+        Assert-AreEqual $vm2.HardwareProfile.VirtualMachineSize $vmsize;
+        Assert-NotNull $vm2.Location;
+
+        $vms = Get-AzureVM -ResourceGroupName $rgname;
+        Assert-AreNotEqual $vms $null;
+
+        # Remove All VMs
+        Get-AzureVM -ResourceGroupName $rgname | Remove-AzureVM -ResourceGroupName $rgname -Force;
+        $vms = Get-AzureVM -ResourceGroupName $rgname;
+        Assert-AreEqual $vms $null;
+    }
+    finally
+    {
+        # Cleanup
+        Clean-ResourceGroup $rgname
+    }
+}
+
+<#
+.SYNOPSIS
+Test Virtual Machines Data Disks Negative
+#>
+function Test-VirtualMachineDataDiskNegative
+{
+    # Setup
+    $rgname = Get-ComputeTestResourceName
+
+    try
+    {
+        # Common
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
         
         # VM Profile & Hardware
@@ -856,7 +1055,7 @@ function Test-VirtualMachineDataDisk
         $p = ($imgRef | Set-AzureVMSourceImage -VM $p);
 
         # Negative Tests on A0 Size + 2 Data Disks
-        Assert-ThrowsContains { New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p; } "The maximum number of data disks allowed to be attached to a VM is 1.";
+        Assert-ThrowsContains { New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p; } "The maximum number of data disks allowed to be attached to a VM is 1.";
     }
     finally
     {
@@ -864,7 +1063,6 @@ function Test-VirtualMachineDataDisk
         Clean-ResourceGroup $rgname
     }
 }
-
 
 <#
 .SYNOPSIS
@@ -878,7 +1076,7 @@ function Test-VirtualMachinePlan
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
         
         # VM Profile & Hardware
@@ -938,7 +1136,7 @@ function Test-VirtualMachinePlan
         $p.Plan.PromotionCode = $plan;
 
         # Negative Tests on non-existing Plan
-        Assert-ThrowsContains { New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p; } "User failed validation to purchase resources";
+        Assert-ThrowsContains { New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p; } "User failed validation to purchase resources";
     }
     finally
     {
@@ -961,11 +1159,12 @@ function Test-VirtualMachinePlan2
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
+        
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
         
         # VM Profile & Hardware
-        $vmsize = 'Standard_A0';
+        $vmsize = Get-DefaultVMSize;
         $vmname = 'vm' + $rgname;
         $p = New-AzureVMConfig -VMName $vmname -VMSize $vmsize;
         # NRP
@@ -984,7 +1183,7 @@ function Test-VirtualMachinePlan2
 
         # Storage Account (SA)
         $stoname = 'sto' + $rgname;
-        $stotype = 'Standard_GRS';
+        $stotype = Get-DefaultStorageType;
         New-AzureStorageAccount -ResourceGroupName $rgname -Name $stoname -Location $loc -Type $stotype;
         $stoaccount = Get-AzureStorageAccount -ResourceGroupName $rgname -Name $stoname;
 
@@ -1001,18 +1200,13 @@ function Test-VirtualMachinePlan2
         $cred = New-Object System.Management.Automation.PSCredential ($user, $securePassword);
         $computerName = 'test';
         $vhdContainer = "https://$stoname.blob.core.windows.net/test";
-        $img = 'a699494373c04fc0bc8f2bb1389d6106__Windows-Server-2012-Datacenter-201503.01-en.us-127GB.vhd';
 
         # $p.StorageProfile.OSDisk = $null;
         $p = Set-AzureVMOperatingSystem -VM $p -Windows -ComputerName $computerName -Credential $cred;
 
         # Image Reference
         # Pick a VMM Image
-        $vmmImgPubName = 'a10networks';
-        $vmmImgOfferName = 'a10-vthunder-adc';
-        $vmmImgSkusName = 'vthunder_byol';
-        $vmmImgVerName = '1.0.0';
-        $imgRef = Get-AzureVMImage -PublisherName $vmmImgPubName -Location $loc -Offer $vmmImgOfferName -Skus $vmmImgSkusName -Version $vmmImgVerName;
+        $imgRef = (Get-MarketplaceImage)[0];
         $plan = $imgRef.PurchasePlan;
         $p = Set-AzureVMSourceImage -VM $p -PublisherName $imgRef.PublisherName -Offer $imgRef.Offer -Skus $imgRef.Skus -Version $imgRef.Version;
         $p.Plan = New-Object Microsoft.Azure.Management.Compute.Models.Plan;
@@ -1023,7 +1217,7 @@ function Test-VirtualMachinePlan2
         $p.OSProfile.WindowsConfiguration = $null;
         
         # Negative Tests on non-purchased Plan
-        Assert-ThrowsContains { New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p; } "Legal terms have not been accepted for this item on this subscription";
+        Assert-ThrowsContains { New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p; } "Legal terms have not been accepted for this item on this subscription";
     }
     finally
     {
@@ -1045,7 +1239,7 @@ function Test-VirtualMachineTags
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
         
         # VM Profile & Hardware
@@ -1093,7 +1287,7 @@ function Test-VirtualMachineTags
 
         # Test Tags
         $tags = @{Name = "test1"; Value = "testval1"}, @{ Name = "test2"; Value = "testval2" };
-        $st = New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p -Tags $tags;
+        $st = New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p -Tags $tags;
         Assert-NotNull $st.RequestId;
         Assert-NotNull $st.StatusCode;
         $vm = Get-AzureVM -ResourceGroupName $rgname -Name $vmname;
@@ -1123,7 +1317,7 @@ function Test-VirtualMachineWithVMAgentAutoUpdate
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
 
         # VM Profile & Hardware
@@ -1188,7 +1382,7 @@ function Test-VirtualMachineWithVMAgentAutoUpdate
 
         # Virtual Machine
         # TODO: Still need to do retry for New-AzureVM for SA, even it's returned in Get-.
-        New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p;
+        New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p;
 
         # Get VM
         $vm1 = Get-AzureVM -Name $vmname -ResourceGroupName $rgname;
@@ -1227,7 +1421,7 @@ function Test-LinuxVirtualMachine
     try
     {
         # Common
-        $loc = 'westus';
+        $loc = Get-ComputeVMLocation;
         New-AzureResourceGroup -Name $rgname -Location $loc -Force;
 
         # VM Profile & Hardware
@@ -1291,7 +1485,7 @@ function Test-LinuxVirtualMachine
 
         # Virtual Machine
         # TODO: Still need to do retry for New-AzureVM for SA, even it's returned in Get-.
-        New-AzureVM -ResourceGroupName $rgname -Location $loc -Name $vmname -VM $p;
+        New-AzureVM -ResourceGroupName $rgname -Location $loc -VM $p;
 
         # Get VM
         $vm1 = Get-AzureVM -Name $vmname -ResourceGroupName $rgname;
@@ -1321,11 +1515,12 @@ function Test-LinuxVirtualMachine
 # Test Image Cmdlet Output Format
 function Test-VMImageCmdletOutputFormat
 {
-    $locStr = 'westus';
-    $publisher = 'MicrosoftWindowsServer';
-    $offer = 'WindowsServer';
-    $sku = '2008-R2-SP1';
-    $ver = '2.0.201503';
+    $locStr = Get-ComputeVMLocation;
+    $imgRef = Get-DefaultCRPImage -loc $locStr;
+    $publisher = $imgRef.PublisherName;
+    $offer = $imgRef.Offer;
+    $sku = $imgRef.Skus;
+    $ver = $imgRef.Version;
 
     Assert-OutputContains " Get-AzureVMImagePublisher -Location $locStr" @('Id', 'Location', 'PublisherName');
 
@@ -1339,7 +1534,7 @@ function Test-VMImageCmdletOutputFormat
 
     Assert-OutputContains " Get-AzureVMImage -Location $locStr -PublisherName $publisher -Offer $offer -Skus $sku -Version $ver " @('Id', 'Location', 'PublisherName', 'Offer', 'Sku', 'Version', 'FilterExpression', 'Name', 'DataDiskImages', 'OSDiskImage', 'PurchasePlan');
 
-    Assert-OutputContains " Get-AzureVMImageDetail -Location $locStr -PublisherName $publisher -Offer $offer -Skus $sku -Version $ver " @('Id', 'Location', 'PublisherName', 'Offer', 'Sku', 'Version', 'FilterExpression', 'Name', 'DataDiskImages', 'OSDiskImage', 'PurchasePlan');
+    Assert-OutputContains " Get-AzureVMImage -Location $locStr -PublisherName $publisher -Offer $offer -Skus $sku -Version $ver " @('Id', 'Location', 'PublisherName', 'Offer', 'Sku', 'Version', 'FilterExpression', 'Name', 'DataDiskImages', 'OSDiskImage', 'PurchasePlan');
 }
 
 # Test Get VM Size from All Locations
@@ -1353,5 +1548,66 @@ function Test-GetVMSizeFromAllLocations
         Assert-True { ($vmsizes | where { $_.Name -eq 'Standard_A3' }).Count -eq 1 }
 
         Write-Output ('Found VM Size Standard_A3 in Location: ' + $loc);
+    }
+}
+
+<#
+.SYNOPSIS
+Test Virtual Machine List with Paging
+#>
+function Test-VirtualMachineListWithPaging
+{
+    # Setup
+    $rgname = Get-ComputeTestResourceName
+
+    try
+    {
+        # Common
+        $loc = Get-ComputeDefaultLocation;
+        $st = New-AzureResourceGroup -Name $rgname -Location $loc -Force;
+
+        $numberOfInstances = 51;
+        $vmSize = 'Standard_A0';
+
+        $templateFile = ".\Templates\azuredeploy.json";
+        $paramFile = ".\Templates\azuredeploy-parameters-51vms.json";
+        $paramContent =
+@"
+{
+  "newStorageAccountName": {
+    "value": "${rgname}sto"
+  },
+  "adminUsername": {
+    "value": "Foo12"
+  },
+  "adminPassword": {
+    "value": "BaR@123${rgname}"
+  },
+  "numberOfInstances": {
+    "value": $numberOfInstances
+  },
+  "location": {
+    "value": "$loc"
+  },
+  "vmSize": {
+    "value": "$vmSize"
+  }
+}
+"@;
+
+        $st = Set-Content -Path $paramFile -Value $paramContent -Force;
+
+        $st = New-AzureResourceGroupDeployment -Name "${rgname}dp" -ResourceGroupName $rgname -TemplateFile $templateFile -TemplateParameterFile $paramFile;
+
+        $vms = Get-AzureVM -ResourceGroupName $rgname;
+        Assert-True { $vms.Count -eq $numberOfInstances };
+
+        $vms = Get-AzureVM;
+        Assert-True { $vms.Count -ge $numberOfInstances };
+    }
+    finally
+    {
+        # Cleanup
+        Clean-ResourceGroup $rgname
     }
 }

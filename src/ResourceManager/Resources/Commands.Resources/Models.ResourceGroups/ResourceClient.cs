@@ -324,16 +324,45 @@ namespace Microsoft.Azure.Commands.Resources.Models
             return newOperations;
         }
 
-        private Deployment CreateBasicDeployment(ValidatePSResourceGroupDeploymentParameters parameters)
+        private Deployment CreateBasicDeployment(ValidatePSResourceGroupDeploymentParameters parameters, DeploymentMode deploymentMode)
         {
             Deployment deployment = new Deployment
             {
                 Properties = new DeploymentProperties {
-                    Mode = DeploymentMode.Incremental,
-                    Template = GetTemplate(parameters.TemplateFile, parameters.GalleryTemplateIdentity),
-                    Parameters = GetDeploymentParameters(parameters.TemplateParameterObject)
+                    Mode = deploymentMode
                 }
             };
+
+            if (Uri.IsWellFormedUriString(parameters.TemplateFile, UriKind.Absolute))
+            {
+                deployment.Properties.TemplateLink = new TemplateLink
+                {
+                    Uri = new Uri(parameters.TemplateFile)
+                };
+            }
+            else if (!string.IsNullOrEmpty(parameters.GalleryTemplateIdentity))
+            {
+                deployment.Properties.TemplateLink = new TemplateLink
+                {
+                    Uri = new Uri(GalleryTemplatesClient.GetGalleryTemplateFile(parameters.GalleryTemplateIdentity))
+                };
+            }
+            else
+            {
+                deployment.Properties.Template = FileUtilities.DataStore.ReadFileAsText(parameters.TemplateFile);
+            }
+
+            if (Uri.IsWellFormedUriString(parameters.ParameterUri, UriKind.Absolute))
+            {
+                deployment.Properties.ParametersLink = new ParametersLink
+                {
+                    Uri = new Uri(parameters.ParameterUri)
+                };
+            }
+            else
+            {
+                deployment.Properties.Parameters = GetDeploymentParameters(parameters.TemplateParameterObject);
+            }
 
             return deployment;
         }
@@ -558,6 +587,18 @@ namespace Microsoft.Azure.Commands.Resources.Models
             }
               
             return allProviderOperations;
+        }
+
+        public ProviderOperationsMetadata GetProviderOperationsMetadata(string providerNamespace)
+        {
+            ProviderOperationsMetadataGetResult result = this.ResourceManagementClient.ProviderOperationsMetadata.Get(providerNamespace);
+            return result.Provider;
+        }
+
+        public IList<ProviderOperationsMetadata> ListProviderOperationsMetadata()
+        {
+           ProviderOperationsMetadataListResult result = this.ResourceManagementClient.ProviderOperationsMetadata.List();
+           return result.Providers;
         }
     }
 }

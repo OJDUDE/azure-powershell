@@ -94,6 +94,18 @@ function Get-ComputeTestLocation
     return $env:AZURE_COMPUTE_TEST_LOCATION;
 }
 
+# Get Compute Default Test Location
+function Get-ComputeDefaultLocation
+{
+    $test_location = Get-ComputeTestLocation;
+    if ($test_location -eq '' -or $test_location -eq $null)
+    {
+        $test_location = 'westus';
+    }
+
+    return $test_location;
+}
+
 # Cleans the created resource group
 function Clean-ResourceGroup($rgname)
 {
@@ -197,6 +209,36 @@ function Get-DefaultVMSize
     return $vmSizes[0].Name;
 }
 
+
+<#
+.SYNOPSIS
+Gets default RDFE Image
+#>
+function Get-DefaultRDFEImage
+{
+    param([string] $loca = "East Asia", [string] $query = '*Windows*Data*Center*')
+
+    $d = (Azure\Get-AzureVMImage | where {$_.ImageName -like $query -and ($_.Location -like "*;$loca;*" -or $_.Location -like "$loca;*" -or $_.Location -like "*;$loca" -or $_.Location -eq "$loca")});
+
+    if ($d -eq $null)
+    {
+        return $null;
+    }
+    else
+    {
+        return $d[-1].ImageName;
+    }
+}
+
+<#
+.SYNOPSIS
+Gets default storage type string
+#>
+function Get-DefaultStorageType
+{
+    return 'Standard_GRS';
+}
+
 <#
 .SYNOPSIS
 Gets default CRP Image
@@ -284,7 +326,7 @@ function Get-MarketplaceImage
 {
     param([string] $location = "westus", [string] $pubFilter = '*', [string] $offerFilter = '*')
 
-    $imgs = Get-AzureVMImagePublisher -Location $location | where { $_.PublisherName -like $pubFilter } | Get-AzureVMImageOffer | where { $_.Offer -like $offerFilter } | Get-AzureVMImageSku | Get-AzureVMImage | Get-AzureVMImageDetail | where { $_.PurchasePlan -ne $null };
+    $imgs = Get-AzureVMImagePublisher -Location $location | where { $_.PublisherName -like $pubFilter } | Get-AzureVMImageOffer | where { $_.Offer -like $offerFilter } | Get-AzureVMImageSku | Get-AzureVMImage | Get-AzureVMImage | where { $_.PurchasePlan -ne $null };
 
     return $imgs;
 }
@@ -332,4 +374,95 @@ function Assert-OutputContains
         Assert-True { $output.Contains($str) }
         $st = Write-Verbose "Found.";
     }
+}
+
+
+# Create a SAS Uri
+function Get-SasUri
+{
+    param ([string] $storageAccount, [string] $storageKey, [string] $container, [string] $file, [TimeSpan] $duration, [Microsoft.WindowsAzure.Storage.Blob.SharedAccessBlobPermissions] $type)
+
+	$uri = [string]::Format("https://{0}.blob.core.windows.net/{1}/{2}", $storageAccount, $container, $file);
+
+	$destUri = New-Object -TypeName System.Uri($uri);
+	$cred = New-Object -TypeName Microsoft.WindowsAzure.Storage.Auth.StorageCredentials($storageAccount, $storageKey);
+	$destBlob = New-Object -TypeName Microsoft.WindowsAzure.Storage.Blob.CloudPageBlob($destUri, $cred);
+	$policy = New-Object Microsoft.WindowsAzure.Storage.Blob.SharedAccessBlobPolicy;
+	$policy.Permissions = $type;
+	$policy.SharedAccessExpiryTime = [DateTime]::UtcNow.Add($duration);
+	$uri += $destBlob.GetSharedAccessSignature($policy);
+
+	return $uri;
+}
+
+# Get a Location according to resource provider.
+function Get-ResourceProviderLocation
+{
+    param ([string] $name, [string] $default = "westus", [bool] $canonical = $true)
+
+	$loc = Get-AzureLocation | where { $_.Name.Equals($name) };
+
+	if ($loc -eq $null)
+	{
+	    throw 'There is no available locations with given parameters';
+	}
+
+	if ($loc.LocationsString.ToLowerInvariant().Replace(" ", "").Contains($default.ToLowerInvariant().Replace(" ","")))
+	{
+	    return $default;
+	}
+
+	if ($canonical)
+	{
+	    return $loc.Locations[0].ToLowerInvariant().Replace(" ", "");
+	}
+	else
+	{
+	    return $loc.Locations[0];
+    }
+}
+
+function Get-ComputeVMLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/virtualMachines";
+}
+
+function Get-ComputeAvailabilitySetLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/availabilitySets";
+}
+
+function Get-ComputeVMExtensionLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/virtualMachines/extensions";
+}
+
+function Get-ComputeVMDiagnosticSettingLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/virtualMachines/diagnosticSettings";
+}
+
+function Get-ComputeVMMetricDefinitionLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/virtualMachines/metricDefinitions";
+}
+
+function Get-ComputeOperationLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/locations/operations";
+}
+
+function Get-ComputeVMSizeLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/locations/vmSizes";
+}
+
+function Get-ComputeUsageLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/locations/usages";
+}
+
+function Get-ComputePublisherLocation
+{
+     Get-ResourceProviderLocation "Microsoft.Compute/locations/publishers";
 }
